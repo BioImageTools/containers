@@ -1,0 +1,18 @@
+channels:
+  - conda-forge
+  - pytorch-lts
+  - defaults
+dependencies:
+  - flatten_json
+  - imagecodecs
+  - numpy>=1.26.0
+  - pyyaml
+  - scikit-image>=0.21.0
+  - zarr=2.13.3
+  - pytorch=1.13
+  - roifile
+  - pip:
+    - cellpose==2.2.3
+    - cellpose[distributed]==2.2.3
+    - pynrrd
+    - tornado
