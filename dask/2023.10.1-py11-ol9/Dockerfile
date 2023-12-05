@@ -2,11 +2,9 @@ ARG DASK_VERSION=2023.10.1
 
 FROM oraclelinux:9
 
-MAINTAINER biocontainers <biodocker@gmail.com>
-
-LABEL base_image="oraclelinux:9"
-LABEL version="1"
 LABEL software="Dask"
+LABEL version="1"
+LABEL base_image="oraclelinux:9"
 LABEL software.version="2023.10.1-py11-ol9"
 LABEL about.summary="Dask is a flexible library for parallel computing in Python."
 LABEL about.home="https://www.dask.org"
@@ -18,6 +16,7 @@ LABEL extra.scripts="/opt/scripts/daskscripts"
 LABEL about.tags="implemented-in::python, interface::daemon, role::devel-lib"
 LABEL conda_forge.minforge.version="23.3.1-1"
 LABEL python.version="3.11"
+LABEL bioimagetools.image.authors="goinac@janelia.hhmi.org,rokickik@janelia.hhmi.org"
 
 ARG TARGETPLATFORM
 

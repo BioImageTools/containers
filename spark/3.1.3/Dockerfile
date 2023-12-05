@@ -3,7 +3,6 @@ ARG SPARK_VERSION=3.1.3
 FROM apache/spark:v${SPARK_VERSION}
 ARG SPARK_VERSION
 
-MAINTAINER biocontainers <biodocker@gmail.com>
 LABEL software="spark" \
     base_image="openjdk:openjdk11" \
     container="spark" \
@@ -17,7 +16,9 @@ LABEL software="spark" \
     about.license_file="/opt/spark/LICENSE" \
     extra.identifiers.biotools="spark" \
     extra.binaries="/opt/spark/bin" \
-    about.tags="implemented-in::java, interface::daemon, role::devel-lib"
+    about.tags="implemented-in::java, interface::daemon, role::devel-lib" \
+    bioimagetools.image.authors="rokickik@janelia.hhmi.org"
+    
 
 # Reset user to root so that the image works in Singularity
 USER 0

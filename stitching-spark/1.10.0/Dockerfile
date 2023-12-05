@@ -23,7 +23,6 @@ RUN echo "$STITCHING_SPARK_GIT_TAG" > /tmp/app/VERSION
 FROM multifish/biocontainers-spark:${SPARK_VERSION}
 ARG STITCHING_SPARK_GIT_TAG
 
-MAINTAINER biocontainers <biodocker@gmail.com>
 LABEL software="stitching-spark" \
     base_image="apache/spark" \
     container="stitching-spark" \
@@ -35,7 +34,8 @@ LABEL software="stitching-spark" \
     about.license="SPDX:GPL-2.0" \
     about.license_file="/app/LICENSE.txt" \
     extra.binaries="/opt/spark/bin" \
-    about.tags="implemented-in::java, interface::commandline, role::program"
+    about.tags="implemented-in::java, interface::commandline, role::program" \
+    bioimagetools.image.authors="rokickik@janelia.hhmi.org"
 
 WORKDIR /app
 COPY --from=builder /tmp/app/LICENSE.txt /app/LICENSE
