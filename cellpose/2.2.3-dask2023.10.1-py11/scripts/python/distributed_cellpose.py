@@ -1,5 +1,6 @@
 import io_utils.read_utils as read_utils
 import io_utils.write_utils as write_utils
+import os
 import sys
 import traceback
 import yaml
@@ -9,7 +10,9 @@ from cellpose.cli import get_arg_parser
 from dask.distributed import (Client, LocalCluster)
 from flatten_json import flatten
 
+from altcontrib.cellpose_worker_plugin import SetEnvWorkerPlugin
 from altcontrib.distributed_segmentation import distributed_segmentation
+
 
 def _inttuple(arg):
     if arg is not None and arg.strip():
@@ -84,6 +87,9 @@ def _define_args():
     distributed_args.add_argument('--device', required=False, default='0', type=str,
                                   dest='device',
                                   help='which device to use, use an integer for torch, or mps for M1')    
+    distributed_args.add_argument('--models-dir', dest='models_dir',
+                                  type=str,
+                                  help='cache cellpose models directory')
     distributed_args.add_argument('--model', dest='segmentation_model',
                                   type=str,
                                   default='cyto',
@@ -113,6 +119,14 @@ def _run_segmentation(args):
 
     if args.dask_scheduler:
         dask_client = Client(address=args.dask_scheduler)
+        if args.models_dir is not None:
+            models_dir = args.models_dir
+        elif os.environ['CELLPOSE_LOCAL_MODELS_PATH']:
+            models_dir = os.environ['CELLPOSE_LOCAL_MODELS_PATH']
+        else:
+            models_dir = None
+        if models_dir:
+            dask_client.register_plugin(SetEnvWorkerPlugin(models_dir))
     else:
         # use a local asynchronous client
         dask_client = Client(LocalCluster())
@@ -200,6 +214,6 @@ if __name__ == '__main__':
         _run_segmentation(args)
         sys.exit(0)
     except Exception as err:
-        print('Segmentation error:', err)
+        print('Cellpose labeling error:', err)
         traceback.print_exception(err)
         sys.exit(1)

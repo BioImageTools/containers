@@ -1,4 +1,4 @@
-FROM  docker.io/biocontainers/dask:2023.10.1-py11-ol9_cv1
+FROM  multifish/dask:2023.10.1-py11-ol9
 
 LABEL software="cellpose"
 LABEL version="2"

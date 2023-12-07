@@ -216,7 +216,7 @@ def _segment_block(eval_method,
             a = new_block_coords[axis].start
             new_block_coords[axis] = slice(a, a + blocksize[axis])
 
-    print(f'Completed segmentation for block {block_index}', flush=True)
+    print(f'Prepared invocations for segmenting block {block_index}', flush=True)
 
     return block_index, tuple(new_block_coords), max_label, labels
 
