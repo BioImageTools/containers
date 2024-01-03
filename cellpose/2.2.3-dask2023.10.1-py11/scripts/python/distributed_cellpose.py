@@ -175,6 +175,7 @@ def _run_segmentation(args):
                                 args.fast_mode)),
                 flow_threshold=args.flow_threshold,
                 cellprob_threshold=args.cellprob_threshold,
+                stitch_threshold=args.stitch_threshold,
                 eval_channels=eval_channels,
                 use_net_avg=args.net_avg,
                 use_gpu=args.use_gpu,
