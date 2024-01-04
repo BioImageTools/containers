@@ -123,7 +123,7 @@ def distributed_segmentation(
     )
 
     if np.prod(nblocks) > 1:
-        print(f'Prepare to link labels for {nblocks}', flush=True)
+        print(f'Submit link labels for {nblocks}', flush=True)
         new_labeling = _link_labels(
             labeled_blocks, labeled_blocks_info, max_label,
             iou_depth,
@@ -310,7 +310,7 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
         max_block_label = da.from_delayed(dmax_block_label, shape=(), dtype=np.uint32)
 
         print(f'{result_index+1}. ',
-            f'Write labels {block_index}, {block_coords} ',
+            f'Submit write labels {block_index}, {block_coords} ',
             f'data type: {block_labels.dtype}, ',
             f'max block label: {max_block_label}, '
             f'label range: {max_label} - {max_label+max_block_label}',
