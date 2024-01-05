@@ -303,18 +303,16 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
     for r in segment_blocks_res:
         (block_index, block_coords, dmax_block_label, dblock_labels) = r
         block_shape = tuple([sl.stop-sl.start for sl in block_coords])
+
+        print(f'{result_index+1}. ',
+            f'Submit write labels {block_index},{block_coords} ',
+            f'block shape: {block_shape}, {dblock_labels.shape}',
+            flush=True)
         block_labels = da.from_delayed(dblock_labels,
                                        shape=block_shape,
                                        dtype=np.uint32)
 
         max_block_label = da.from_delayed(dmax_block_label, shape=(), dtype=np.uint32)
-
-        print(f'{result_index+1}. ',
-            f'Submit write labels {block_index}, {block_coords} ',
-            f'data type: {block_labels.dtype}, ',
-            f'max block label: {max_block_label}, '
-            f'label range: {max_label} - {max_label+max_block_label}',
-            flush=True)
 
         block_labels_offsets = da.where(block_labels > 0,
                                         max_label,
