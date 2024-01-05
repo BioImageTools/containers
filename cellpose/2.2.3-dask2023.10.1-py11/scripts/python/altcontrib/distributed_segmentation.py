@@ -412,9 +412,13 @@ def _across_block_label_grouping(face, axis, iou_threshold):
         iou = np.where(intersection > 0, intersection / union, 0).astype(np.uint32)
 
     labels0, labels1 = np.nonzero(iou >= iou_threshold)
+    print(f'labels0 ({labels0.shape}):', labels0, flush=True)
+    print(f'labels1 ({labels1.shape}):', labels1, flush=True)
 
     labels0_orig = unique[labels0]
     labels1_orig = unique[labels1]
+    print(f'unique labels0 ({labels0_orig.shape}):', labels0_orig, flush=True)
+    print(f'unique labels1 ({labels1_orig.shape}):', labels1_orig, flush=True)
     grouped = np.stack([labels0_orig, labels1_orig])
 
     print(f'Current labels ({grouped.shape}):', grouped, flush=True)
