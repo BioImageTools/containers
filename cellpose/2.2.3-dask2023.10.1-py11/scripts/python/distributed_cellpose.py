@@ -163,6 +163,8 @@ def _run_segmentation(args):
             eval_channels = None
 
         try:
+            print(f'Invoke segmentation with blocksize {process_blocksize}',
+                  flush=True)
             output_labels = distributed_segmentation(
                 image_data,
                 args.segmentation_model,
