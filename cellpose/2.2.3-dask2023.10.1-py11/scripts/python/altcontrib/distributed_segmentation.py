@@ -425,8 +425,8 @@ def _across_block_label_grouping(face, axis, iou_threshold):
     # Discard any mappings with bg pixels
     valid = np.all(grouped != 0, axis=0).astype(np.uint32)
     print(f'Valid labels ({valid.shape}):', valid, flush=True)
-
-    return grouped[:, valid]
+    # if there's not more than one label return it as is
+    return grouped[:, valid] if grouped.size > 2 else grouped
 
 
 def _mappings_as_csr(i, j, n):
