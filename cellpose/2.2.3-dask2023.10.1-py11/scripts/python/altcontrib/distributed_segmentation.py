@@ -417,8 +417,11 @@ def _across_block_label_grouping(face, axis, iou_threshold):
     labels1_orig = unique[labels1]
     grouped = np.stack([labels0_orig, labels1_orig])
 
+    print(f'Current labels ({grouped.shape}):', grouped, flush=True)
     # Discard any mappings with bg pixels
     valid = np.all(grouped != 0, axis=0).astype(np.uint32)
+    print(f'Valid labels ({valid.shape}):', valid, flush=True)
+
     return grouped[:, valid]
 
 
