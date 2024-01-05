@@ -180,6 +180,7 @@ def _run_segmentation(args):
                 stitch_threshold=args.stitch_threshold,
                 eval_channels=eval_channels,
                 use_net_avg=args.net_avg,
+                use_torch=args.use_gpu,
                 use_gpu=args.use_gpu,
                 device=args.device,
                 max_tasks=args.max_cellpose_tasks,
