@@ -49,6 +49,11 @@ def save(data, container_path, subpath,
         print(f'Persist data as n5 {container_path} ',
               f'({real_container_path}):{subpath}',
               flush=True)
+        attrs = {}
+        if resolution is not None:
+            attrs['pixelResolution'] = resolution
+        if scale_factors is not None:
+            attrs['downsamplingFactors'] = scale_factors
         output_data = zarr_utils.create_dataset(
             container_path,
             subpath,
@@ -56,14 +61,18 @@ def save(data, container_path, subpath,
             blocksize,
             data.dtype,
             data_store_name='n5',
-            pixelResolution=resolution,
-            downsamplingFactors=scale_factors,
+            **attrs,
         )
         persist_block = functools.partial(_save_block_to_zarr, output=output_data)
     elif container_ext == '.zarr':
         print(f'Persist data as zarr {container_path} ',
               f'({real_container_path}):{subpath}',
               flush=True)
+        attrs = {}
+        if resolution is not None:
+            attrs['pixelResolution'] = resolution
+        if scale_factors is not None:
+            attrs['downsamplingFactors'] = scale_factors
         output_data = zarr_utils.create_dataset(
             container_path,
             subpath,
@@ -71,8 +80,7 @@ def save(data, container_path, subpath,
             blocksize,
             data.dtype,
             data_store_name='zarr',
-            pixelResolution=resolution,
-            downsamplingFactors=scale_factors,
+            **attrs,
         )
         persist_block = functools.partial(_save_block_to_zarr, output=output_data)
 
