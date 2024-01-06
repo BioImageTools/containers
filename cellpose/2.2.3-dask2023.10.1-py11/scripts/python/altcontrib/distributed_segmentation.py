@@ -4,6 +4,7 @@ import functools
 import numpy as np
 import scipy
 import time
+import traceback
 
 from dask.distributed import as_completed, Semaphore
 from sklearn import metrics as sk_metrics
@@ -74,10 +75,8 @@ def distributed_segmentation(
 
     get_image_block = functools.partial(_get_block_data, image)
 
-    image_blocks = client.map(
-        get_image_block,
-        blocks_info,
-    )
+    image_data = client.scatter(blocks_info)
+    image_blocks = client.map(get_image_block, image_data)
 
     if max_tasks > 0:
         print(f'Limit segmentation tasks to {max_tasks}', flush=True)
@@ -305,29 +304,36 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
     result_index = 0
     max_label = 0
     # collect segmentation results
-    for batch in as_completed(segment_blocks_res, with_results=True).batches():
-        for _, r in batch:
-            (block_index, block_coords, max_block_label, block_labels) = r
-            block_shape = tuple([sl.stop-sl.start for sl in block_coords])
+    completed_segment_blocks = as_completed(segment_blocks_res, with_results=True)
+    for f,r in completed_segment_blocks:
+        print(f'Process future {f}', r, flush=True)
+        if f.cancelled():
+            exc = f.exception()
+            print('Segment block future exception:', exc, flush=True)
+            tb = f.traceback()
+            traceback.print_tb(tb)
 
-            print(f'{result_index+1}. ',
-                f'Write labels {block_index},{block_coords} ',
-                f'block shape: {block_shape} ?==? {block_labels.shape}',
-                f'max block label: {max_block_label}',
-                flush=True)
+        (block_index, block_coords, max_block_label, block_labels) = r
+        block_shape = tuple([sl.stop-sl.start for sl in block_coords])
 
-            block_labels_offsets = np.where(block_labels > 0,
-                                            max_label,
-                                            np.uint32(0)).astype(np.uint32)
-            block_labels += block_labels_offsets
-            # block_index, block_coords, labels_range
-            labeled_blocks_info.append((block_index,
-                                        block_coords,
-                                        (max_label, max_label+max_block_label)))
-            # set the block in the dask array of labeled blocks
-            labels[block_coords] = block_labels[...]
-            max_label = max_label + max_block_label
-            result_index += 1
+        print(f'{result_index+1}. ',
+            f'Write labels {block_index},{block_coords} ',
+            f'block shape: {block_shape} ?==? {block_labels.shape}',
+            f'max block label: {max_block_label}',
+            flush=True)
+
+        block_labels_offsets = np.where(block_labels > 0,
+                                        max_label,
+                                        np.uint32(0)).astype(np.uint32)
+        block_labels += block_labels_offsets
+        # block_index, block_coords, labels_range
+        labeled_blocks_info.append((block_index,
+                                    block_coords,
+                                    (max_label, max_label+max_block_label)))
+        # set the block in the dask array of labeled blocks
+        labels[block_coords] = block_labels[...]
+        max_label = max_label + max_block_label
+        result_index += 1
 
     print(f'Finished collecting labels in {shape} image',
           flush=True)
