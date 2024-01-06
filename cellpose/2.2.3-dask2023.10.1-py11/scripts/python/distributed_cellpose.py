@@ -186,6 +186,7 @@ def _run_segmentation(args):
                 max_tasks=args.max_cellpose_tasks,
                 iou_threshold=args.iou_threshold,
                 iou_depth=args.iou_depth,
+                client=dask_client,
             )
 
             persisted_labels = write_utils.save(

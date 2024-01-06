@@ -5,8 +5,10 @@ import numpy as np
 import scipy
 import time
 
-from dask.distributed import Semaphore
+from dask.distributed import as_completed, Semaphore
 from sklearn import metrics as sk_metrics
+
+from cellpose.io import logger_setup
 
 
 def distributed_segmentation(
@@ -33,11 +35,12 @@ def distributed_segmentation(
         gpu_batch_size=8,
         iou_depth=1,
         iou_threshold=0.7,
+        client=None
 ):
     if diameter <= 0:
         # always specify the diameter
         diameter = 30
-
+    logger_setup()
     blocksize = (blocksize if (blocksize is not None and 
                                len(blocksize) == image.ndim)
                            else (128,) * image.ndim)
@@ -71,7 +74,7 @@ def distributed_segmentation(
 
     get_image_block = functools.partial(_get_block_data, image)
 
-    image_blocks = map(
+    image_blocks = client.map(
         get_image_block,
         blocks_info,
     )
@@ -85,7 +88,7 @@ def distributed_segmentation(
         eval_model_method = _eval_model
 
     eval_block = functools.partial(
-        dask.delayed(eval_model_method),
+        eval_model_method,
         model_type=model_type,
         eval_channels=eval_channels,
         use_net_avg=use_net_avg,
@@ -111,7 +114,7 @@ def distributed_segmentation(
         blockoverlaps=blockoverlaps,
     )
 
-    segment_block_res = map(
+    segment_block_res = client.map(
         segment_block,
         image_blocks
     )
@@ -188,7 +191,10 @@ def _segment_block(eval_method,
                    preprocessing_steps=[],
 ):
     block_index, block_coords, block_data = block
+    print(f'Segment block: {block_index}, {block_coords}',
+          flush=True)
     block_shape = tuple([sl.stop-sl.start for sl in block_coords])
+
     # preprocess
     for pp_step in preprocessing_steps:
         block_data = pp_step[0](block_data, **pp_step[1])
@@ -216,8 +222,7 @@ def _segment_block(eval_method,
             a = new_block_coords[axis].start
             new_block_coords[axis] = slice(a, a + blocksize[axis])
 
-    print(f'Prepared invocations for segmenting block {block_index}', flush=True)
-
+    print(f'Finished segmenting block {block_index}', flush=True)
     return block_index, tuple(new_block_coords), max_label, labels
 
 
@@ -241,7 +246,6 @@ def _eval_model(block_index,
                 gpu_batch_size=8,
 ):
     from cellpose import models
-    from cellpose.io import logger_setup
 
     print(f'{time.ctime(time.time())} '
           f'Run model eval for block: {block_index}, size: {block_data.shape}',
@@ -295,37 +299,35 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
     labels: dask array created from segmentation results
 
     """
+    print('Begin collecting labeled blocks: ', flush=True)
     labeled_blocks_info = []
     labels = da.empty(shape, dtype=np.uint32, chunks=chunksize)
     result_index = 0
     max_label = 0
     # collect segmentation results
-    for r in segment_blocks_res:
-        (block_index, block_coords, dmax_block_label, dblock_labels) = r
-        block_shape = tuple([sl.stop-sl.start for sl in block_coords])
+    for batch in as_completed(segment_blocks_res, with_results=True).batches():
+        for _, r in batch:
+            (block_index, block_coords, max_block_label, block_labels) = r
+            block_shape = tuple([sl.stop-sl.start for sl in block_coords])
 
-        print(f'{result_index+1}. ',
-            f'Submit write labels {block_index},{block_coords} ',
-            f'block shape: {block_shape}, {dblock_labels.shape}',
-            flush=True)
-        block_labels = da.from_delayed(dblock_labels,
-                                       shape=block_shape,
-                                       dtype=np.uint32)
+            print(f'{result_index+1}. ',
+                f'Write labels {block_index},{block_coords} ',
+                f'block shape: {block_shape} ?==? {block_labels.shape}',
+                f'max block label: {max_block_label}',
+                flush=True)
 
-        max_block_label = da.from_delayed(dmax_block_label, shape=(), dtype=np.uint32)
-
-        block_labels_offsets = da.where(block_labels > 0,
-                                        max_label,
-                                        np.uint32(0)).astype(np.uint32)
-        block_labels += block_labels_offsets
-        # block_index, block_coords, labels_range
-        labeled_blocks_info.append((block_index,
-                                    block_coords,
-                                    (max_label, max_label+max_block_label)))
-        # set the block in the dask array of labeled blocks
-        labels[block_coords] = block_labels[...]
-        max_label = max_label + max_block_label
-        result_index += 1
+            block_labels_offsets = np.where(block_labels > 0,
+                                            max_label,
+                                            np.uint32(0)).astype(np.uint32)
+            block_labels += block_labels_offsets
+            # block_index, block_coords, labels_range
+            labeled_blocks_info.append((block_index,
+                                        block_coords,
+                                        (max_label, max_label+max_block_label)))
+            # set the block in the dask array of labeled blocks
+            labels[block_coords] = block_labels[...]
+            max_label = max_label + max_block_label
+            result_index += 1
 
     print(f'Finished collecting labels in {shape} image',
           flush=True)
