@@ -1,6 +1,8 @@
 import dask
 import dask.array as da
+import dask.bag as db
 import functools
+import io_utils.read_utils as read_utils
 import numpy as np
 import scipy
 import time
@@ -9,14 +11,15 @@ import traceback
 from dask.distributed import as_completed, Semaphore
 from sklearn import metrics as sk_metrics
 
-from cellpose.io import logger_setup
-
 
 def distributed_segmentation(
-        image,
+        image_path,
+        image_subpath,
+        image_shape,
+        image_ndim,
         model_type,
         diameter,
-        blocksize=None,
+        blocksize,
         blocksoverlap=(),
         mask=None,
         use_torch=False,
@@ -41,14 +44,9 @@ def distributed_segmentation(
     if diameter <= 0:
         # always specify the diameter
         diameter = 30
-    logger_setup()
-    blocksize = (blocksize if (blocksize is not None and 
-                               len(blocksize) == image.ndim)
-                           else (128,) * image.ndim)
-
     blocksoverlap = (blocksoverlap if (blocksoverlap is not None and 
-                                       len(blocksoverlap) == image.ndim)
-                                   else (diameter * 2,) * image.ndim)
+                                       len(blocksoverlap) == image_ndim)
+                                   else (diameter * 2,) * image_ndim)
 
     blockchunks = np.array(blocksize, dtype=int)
     blockoverlaps = np.array(blocksoverlap, dtype=int)
@@ -58,7 +56,7 @@ def distributed_segmentation(
         if blockoverlaps[ax] > blockchunks[ax] / 2:
             blockoverlaps[ax] = int(blockchunks[ax] / 2)
 
-    nblocks = np.ceil(np.array(image.shape) / blockchunks).astype(int)
+    nblocks = np.ceil(np.array(image_shape) / blockchunks).astype(int)
     print(f'Blocksize:{blockchunks}, '
           f'overlap:{blockoverlaps} => {nblocks} blocks',
           flush=True)
@@ -68,15 +66,10 @@ def distributed_segmentation(
         start = blockchunks * (i, j, k) - blockoverlaps
         stop = start + blockchunks + 2*blockoverlaps
         start = np.maximum(0, start)
-        stop = np.minimum(image.shape, stop)
+        stop = np.minimum(image_shape, stop)
         blockslice = tuple(slice(x, y) for x, y in zip(start, stop))
-        if _is_not_masked(mask, image.shape, blockslice):
+        if _is_not_masked(mask, image_shape, blockslice):
             blocks_info.append(((i, j, k), blockslice))
-
-    get_image_block = functools.partial(_get_block_data, image)
-
-    image_data = client.scatter(blocks_info)
-    image_blocks = client.map(get_image_block, image_data)
 
     if max_tasks > 0:
         print(f'Limit segmentation tasks to {max_tasks}', flush=True)
@@ -106,6 +99,12 @@ def distributed_segmentation(
         gpu_batch_size=gpu_batch_size,
     )
 
+    get_block = functools.partial(
+        _get_block_data,
+        image_path=image_path,
+        image_subpath=image_subpath,
+    )
+
     segment_block = functools.partial(
         _segment_block,
         eval_block,
@@ -113,14 +112,23 @@ def distributed_segmentation(
         blockoverlaps=blockoverlaps,
     )
 
+    dblocks_info = client.scatter(
+        blocks_info,
+    )
+
+    image_blocks = client.map(
+        get_block,
+        dblocks_info,
+    )
+
     segment_block_res = client.map(
         segment_block,
-        image_blocks
+        image_blocks,
     )
 
     labeled_blocks, labeled_blocks_info, max_label = _collect_labeled_blocks(
         segment_block_res,
-        image.shape,
+        image_shape,
         blocksize,
     )
 
@@ -160,11 +168,14 @@ def _is_not_masked(mask, image_shape, blockslice):
         return False
 
 
-def _get_block_data(image, block_info):
+def _get_block_data(block_info, 
+                    image_path=None,
+                    image_subpath=None):
     block_index, block_coords = block_info
     print(f'{time.ctime(time.time())} '
         f'Get block: {block_index}, from: {block_coords}',
         flush=True)
+    image, _ = read_utils.open(image_path, image_subpath)
     block_data = da.from_array(image[block_coords])
     return block_index, block_coords, block_data
 
@@ -245,6 +256,7 @@ def _eval_model(block_index,
                 gpu_batch_size=8,
 ):
     from cellpose import models
+    from cellpose.io import logger_setup
 
     print(f'{time.ctime(time.time())} '
           f'Run model eval for block: {block_index}, size: {block_data.shape}',

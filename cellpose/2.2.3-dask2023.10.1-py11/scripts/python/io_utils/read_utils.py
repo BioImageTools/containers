@@ -1,8 +1,9 @@
+import dask.array as da
 import nrrd
 import numpy as np
 import os
-
-from skimage import io
+import tifffile
+import zarr
 
 from . import zarr_utils
 
@@ -18,7 +19,7 @@ def open(container_path, subpath):
         return nrrd.read(container_path)
     elif container_ext == '.tif' or container_ext == '.tiff':
         print(f'Open tiff {container_path} ({real_container_path})', flush=True)
-        im = io.imread(container_path)
+        im = read_tiff(container_path)
         return im, {}
     elif container_ext == '.npy':
         im = np.load(container_path)
@@ -29,3 +30,9 @@ def open(container_path, subpath):
     else:
         print(f'Cannot handle {container_path} ({real_container_path}): {subpath}', flush=True)
         return None, {}
+
+
+def read_tiff(input_path):
+    tif_store = tifffile.imread(input_path, aszarr=True)
+    tif_array = zarr.open(tif_store)
+    return tif_array

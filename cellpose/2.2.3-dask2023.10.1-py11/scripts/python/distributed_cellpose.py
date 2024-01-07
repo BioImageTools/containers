@@ -108,8 +108,6 @@ def _define_args():
 
 
 def _run_segmentation(args):
-    image_data, image_attrs = read_utils.open(args.input, args.input_subpath)
-
     if (args.dask_config):
         import dask.config
         print(f'Use dask config: {args.dask_config}', flush=True)
@@ -131,22 +129,28 @@ def _run_segmentation(args):
         # use a local asynchronous client
         dask_client = Client(LocalCluster())
 
+    image_data, image_attrs = read_utils.open(args.input, args.input_subpath)
+    image_ndim = image_data.ndim
+    image_shape = image_data.shape
+    image_dtype = image_data.dtype
+    image_data = None
+
     print('Image data shape/dim/dtype:', 
-          image_data.shape, image_data.ndim, image_data.dtype,
+          image_shape, image_ndim, image_dtype,
           flush=True)
     
     if args.output:
         output_subpath = args.output_subpath if args.output_subpath else args.input_subpath
 
         if (args.output_blocksize is not None and
-            len(args.output_blocksize) == image_data.ndim):
+            len(args.output_blocksize) == image_ndim):
             output_blocks = args.output_blocksize[::-1] # make it zyx
         else:
             # default to output_chunk_size
-            output_blocks = (args.output_chunk_size,) * image_data.ndim
+            output_blocks = (args.output_chunk_size,) * image_ndim
 
         if (args.process_blocksize is not None and
-            len(args.process_blocksize) == image_data.ndim):
+            len(args.process_blocksize) == image_ndim):
             process_blocksize = args.process_blocksize[::-1] # make it zyx
         else:
             process_blocksize = output_blocks
@@ -166,10 +170,13 @@ def _run_segmentation(args):
             print(f'Invoke segmentation with blocksize {process_blocksize}',
                   flush=True)
             output_labels = distributed_segmentation(
-                image_data,
+                args.input,
+                args.input_subpath,
+                image_shape,
+                image_ndim,
                 args.segmentation_model,
                 args.diam_mean,
-                blocksize=process_blocksize,
+                process_blocksize,
                 blocksoverlap=blocks_overlaps,
                 anisotropy=args.anisotropy,
                 min_size=args.min_size,
