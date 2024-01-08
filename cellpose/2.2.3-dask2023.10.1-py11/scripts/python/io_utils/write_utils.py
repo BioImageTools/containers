@@ -12,7 +12,6 @@ def save(data, container_path, subpath,
          blocksize=None,
          resolution=None,
          scale_factors=None,
-         client=None,
 ):
     """
     Persist distributed data - typically a dask array to the specified
@@ -92,13 +91,12 @@ def save(data, container_path, subpath,
               flush=True)
 
     if persist_block is not None:
-        return save_blocks(data, persist_block, blocksize,
-                           client=client)
+        return save_blocks(data, persist_block, blocksize)
     else:
         return None
 
 
-def save_blocks(dimage, persist_block, blocksize, client=None):
+def save_blocks(dimage, persist_block, blocksize):
     if blocksize is None:
         chunksize = dimage.chunksize
     else:
@@ -112,9 +110,8 @@ def save_blocks(dimage, persist_block, blocksize, client=None):
               f'to {chunksize} before persisting it',
               flush=True)
         rechunked_dimage = da.rechunk(dimage, chunks=chunksize)
-
-    return da.map_blocks(persist_block, rechunked_dimage,
-                         chunks=chunksize,
+    return da.map_blocks(persist_block,
+                         rechunked_dimage,
                          # drop all axis - the result of map_blocks is None
                          drop_axis=tuple(range(rechunked_dimage.ndim)),
                          meta=np.array((np.nan)))
