@@ -201,6 +201,7 @@ def _run_segmentation(args):
                 blocksize=output_blocks,
                 resolution=image_attrs.get('pixelResolution'),
                 scale_factors=image_attrs.get('downsamplingFactors'),
+                client=dask_client,
             )
 
             if persisted_labels is not None:

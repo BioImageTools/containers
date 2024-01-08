@@ -112,13 +112,9 @@ def distributed_segmentation(
         blockoverlaps=blockoverlaps,
     )
 
-    dblocks_info = client.scatter(
-        blocks_info,
-    )
-
     image_blocks = client.map(
         get_block,
-        dblocks_info,
+        blocks_info,
     )
 
     segment_block_res = client.map(
@@ -139,9 +135,10 @@ def distributed_segmentation(
             iou_depth,
             iou_threshold
         )
+        dlabeled_blocks = client.scatter(labeled_blocks)
         relabeled = da.map_blocks(
             _relabel_block,
-            labeled_blocks,
+            dlabeled_blocks,
             labeling=new_labeling,
             dtype=labeled_blocks.dtype,
             chunks=labeled_blocks.chunks)
@@ -201,7 +198,9 @@ def _segment_block(eval_method,
                    preprocessing_steps=[],
 ):
     block_index, block_coords, block_data = block
-    print(f'Segment block: {block_index}, {block_coords}',
+    start_time = time.time()
+    print(f'{time.ctime(start_time)} ',
+          f'Segment block: {block_index}, {block_coords}',
           flush=True)
     block_shape = tuple([sl.stop-sl.start for sl in block_coords])
 
@@ -232,7 +231,11 @@ def _segment_block(eval_method,
             a = new_block_coords[axis].start
             new_block_coords[axis] = slice(a, a + blocksize[axis])
 
-    print(f'Finished segmenting block {block_index}', flush=True)
+    end_time = time.time()
+    print(f'{time.ctime(start_time)} ',
+          f'Finished segmenting block {block_index} ',
+          f'in {end_time-start_time}s',
+          flush=True)
     return block_index, tuple(new_block_coords), max_label, labels
 
 
@@ -310,7 +313,8 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
     labels: dask array created from segmentation results
 
     """
-    print('Begin collecting labeled blocks: ', flush=True)
+    print('Begin collecting labeled blocks (blocksize={chunksize})',
+          flush=True)
     labeled_blocks_info = []
     labels = da.empty(shape, dtype=np.uint32, chunks=chunksize)
     result_index = 0
@@ -318,7 +322,7 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
     # collect segmentation results
     completed_segment_blocks = as_completed(segment_blocks_res, with_results=True)
     for f,r in completed_segment_blocks:
-        print(f'Process future {f}', r, flush=True)
+        print(f'Process future {f}', flush=True)
         if f.cancelled():
             exc = f.exception()
             print('Segment block future exception:', exc, flush=True)

@@ -12,6 +12,7 @@ def save(data, container_path, subpath,
          blocksize=None,
          resolution=None,
          scale_factors=None,
+         client=None,
 ):
     """
     Persist distributed data - typically a dask array to the specified
@@ -46,7 +47,8 @@ def save(data, container_path, subpath,
                                           resolution=resolution,
                                           ext=container_ext)
     elif container_ext == '.n5' or (container_ext == '' and subpath):
-        print(f'Persist data as n5 {container_path} ',
+        print(f'Persist {data.shape} ({data.dtype}) data ',
+              f'as N5 to {container_path} ',
               f'({real_container_path}):{subpath}',
               flush=True)
         attrs = {}
@@ -90,52 +92,41 @@ def save(data, container_path, subpath,
               flush=True)
 
     if persist_block is not None:
-        return save_blocks(data, persist_block, blocksize=blocksize)
+        return save_blocks(data, persist_block, blocksize,
+                           client=client)
     else:
-        return None    
+        return None
 
 
-def save_blocks(dimage, persist_block, blocksize=None):
+def save_blocks(dimage, persist_block, blocksize, client=None):
     if blocksize is None:
         chunksize = dimage.chunksize
     else:
-        chunksize = tuple([d1 if d1 <= d2 else d2
-                           for (d1,d2) in zip(blocksize, dimage.shape)])
+        chunksize = blocksize
 
     if chunksize == dimage.chunksize:
         rechunked_dimage = dimage
     else:
         # rechunk the image
-        print(f'Rechunk the image using {chunksize} before persisting it',
+        print(f'Rechunk {dimage.shape} image from {dimage.chunksize} ',
+              f'to {chunksize} before persisting it',
               flush=True)
-        rechunked_dimage = da.zeros_like(dimage, chunks=blocksize)
-        chunksize = blocksize
-        rechunked_dimage = da.map_blocks(_copy_blocks_from,
-                                         rechunked_dimage,
-                                         dtype=rechunked_dimage.dtype,
-                                         chunks=chunksize,
-                                         meta=np.array(rechunked_dimage.shape),
-                                         src=dimage)
+        rechunked_dimage = da.rechunk(dimage, chunks=chunksize)
 
     return da.map_blocks(persist_block, rechunked_dimage,
+                         chunks=chunksize,
                          # drop all axis - the result of map_blocks is None
                          drop_axis=tuple(range(rechunked_dimage.ndim)),
                          meta=np.array((np.nan)))
-
-
-def _copy_blocks_from(block, block_info=None, src=None):
-    if block_info is not None and src is not None:
-        block_coords = _block_coords_from_block_info(block_info)
-        return src[block_coords]
-    else:
-        return block
 
 
 def _save_block_to_nrrd(block, output_dir=None, output_name=None,
                         block_info=None,
                         ext='.nrrd'):
     if block_info is not None:
-        block_coords = _block_coords_from_block_info(block_info)
+        output_coords = _block_coords_from_block_info(block_info)
+        block_coords = tuple([slice(s.start-s.start, s.stop-s.start)
+                              for s in output_coords])
 
         saved_blocks_count = np.prod(block_info[None]['num-chunks'])
         if saved_blocks_count > 1:
@@ -148,9 +139,10 @@ def _save_block_to_nrrd(block, output_dir=None, output_name=None,
         full_filename = os.path.join(output_dir, filename)
         print(f'Write block {block.shape}',
               f'block_info: {block_info}',
+              f'output_coords: {output_coords}',
               f'block_coords: {block_coords}',
               flush=True)
-        nrrd.write(full_filename, block.transpose(2, 1, 0),
+        nrrd.write(full_filename, block[block_coords].transpose(2, 1, 0),
                    compression_level=2)
 
 
@@ -160,7 +152,9 @@ def _save_block_to_tiff(block, output_dir=None, output_name=None,
                         ext='.tif',
                         ):
     if block_info is not None:
-        block_coords = _block_coords_from_block_info(block_info)
+        output_coords = _block_coords_from_block_info(block_info)
+        block_coords = tuple([slice(s.start-s.start, s.stop-s.start)
+                              for s in output_coords])
 
         saved_blocks_count = np.prod(block_info[None]['num-chunks'])
         if saved_blocks_count > 1:
@@ -173,6 +167,7 @@ def _save_block_to_tiff(block, output_dir=None, output_name=None,
         full_filename = os.path.join(output_dir, filename)
         print(f'Write block {block.shape}',
               f'block_info: {block_info}',
+              f'output_coords: {output_coords}',
               f'block_coords: {block_coords}',
               f'to {full_filename}',
               flush=True)
@@ -182,18 +177,21 @@ def _save_block_to_tiff(block, output_dir=None, output_name=None,
         if resolution is not None:
             tiff_metadata['resolution'] = resolution
 
-        tifffile.imwrite(full_filename, block, 
+        tifffile.imwrite(full_filename, block[block_coords],
                          metadata=tiff_metadata)
 
 
 def _save_block_to_zarr(block, output=None, block_info=None):
-    if block_info is not None:
-        block_coords = _block_coords_from_block_info(block_info)
+    if block_info is not None and output is not None:
+        output_coords = _block_coords_from_block_info(block_info)
+        block_coords = tuple([slice(s.start-s.start, s.stop-s.start)
+                              for s in output_coords])
         print(f'Write block {block.shape}',
               f'block_info: {block_info}',
+              f'output_coords: {output_coords}',
               f'block_coords: {block_coords}',
               flush=True)
-        output[block_coords] = block
+        output[output_coords] = block[block_coords]
 
 
 def _block_coords_from_block_info(block_info):
