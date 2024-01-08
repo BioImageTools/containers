@@ -129,16 +129,15 @@ def distributed_segmentation(
     )
 
     if np.prod(nblocks) > 1:
-        print(f'Submit link labels for {nblocks}', flush=True)
+        print(f'Submit link labels for {nblocks} label blocks', flush=True)
         new_labeling = _link_labels(
             labeled_blocks, labeled_blocks_info, max_label,
             iou_depth,
             iou_threshold
         )
-        dlabeled_blocks = client.scatter(labeled_blocks)
         relabeled = da.map_blocks(
             _relabel_block,
-            dlabeled_blocks,
+            labeled_blocks,
             labeling=new_labeling,
             dtype=labeled_blocks.dtype,
             chunks=labeled_blocks.chunks)
@@ -336,6 +335,7 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
             f'Write labels {block_index},{block_coords} ',
             f'block shape: {block_shape} ?==? {block_labels.shape}',
             f'max block label: {max_block_label}',
+            f'block labels range: {max_label} - {max_label+max_block_label}',
             flush=True)
 
         block_labels_offsets = np.where(block_labels > 0,
@@ -363,10 +363,11 @@ def _link_labels(labels, blocks_info, nlabels, face_depth, iou_threshold):
                                           nlabels,
                                           face_depth,
                                           iou_threshold)
-
-    print(f'Label groups found: {label_groups}', flush=True)
-    connected_comps = dask.delayed(scipy.sparse.csgraph.connected_components, nout=2)
-    connected_comps_res = connected_comps(label_groups, directed=False)[1]
+    print('Find connected components for label groups found', flush=True)
+    connected_comps_res = dask.delayed(scipy.sparse.csgraph.connected_components, nout=2)(
+        label_groups,
+        directed=False,
+    )[1]
     return da.from_delayed(connected_comps_res, shape=(np.nan,), dtype=labels.dtype)
 
 
@@ -378,14 +379,18 @@ def _label_adjacency_graph(labels, blocks_coords, nlabels, block_face_depth,
     all_mappings = [ da.empty((2, 0), dtype=labels.dtype, chunks=1) ]
     for face_slice, axis in block_faces_and_axes:
         face = labels[face_slice]
-        mapped = _across_block_label_grouping_delayed(face, axis,
-                                                      iou_threshold)
-        print(f'Label mapping for face {face_slice} along {axis} axis: {mapped}',
+        print(f'Map labels for face {face_slice} along {axis} axis',
               flush=True)
+        dmapped = dask.delayed(_across_block_label_grouping)(
+            face, axis, iou_threshold
+        )
+        mapped = da.from_delayed(
+            dmapped,
+            shape=(2, np.nan),
+            dtype=face.dtype
+        )
         all_mappings.append(mapped)
-
     i, j = da.concatenate(all_mappings, axis=1)
-
     # reformat as csr_matrix
     return dask.delayed(_mappings_as_csr)(i, j, nlabels+1)
 
@@ -405,17 +410,6 @@ def _get_face_slices_and_axes(blocks_coords, image_shape, face_depth):
             )
             face_slices_and_axes.append((tuple(slice_to_append), ax))
     return face_slices_and_axes
-
-
-def _across_block_label_grouping_delayed(face, axis, iou_threshold):
-    grouped_results = dask.delayed(_across_block_label_grouping)(
-        face, axis, iou_threshold
-    )
-    return da.from_delayed(
-        grouped_results,
-        shape=(2, np.nan),
-        dtype=face.dtype
-    )
 
 
 def _across_block_label_grouping(face, axis, iou_threshold):
