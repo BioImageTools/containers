@@ -21,6 +21,7 @@ def distributed_segmentation(
         model_type,
         diameter,
         blocksize,
+        output_dir,
         blocksoverlap=(),
         mask=None,
         use_torch=False,
@@ -142,10 +143,15 @@ def distributed_segmentation(
         print(f'Relabel {nblocks} blocks using {labeled_blocks.chunks}',
               f'{labeled_blocks.dtype} chunks',
               flush=True)
-        relabeled = da.map_blocks(
-            operator.getitem,
+        labels_filename = f'{output_dir}/labels.npy'
+        saved_labels_filename = dask.delayed(_save_labels)(
             da_new_labeling,
+            labels_filename,
+        )
+        relabeled = da.map_blocks(
+            _relabel_block,
             labeled_blocks,
+            saved_labels_filename,
             dtype=labeled_blocks.dtype,
             chunks=labeled_blocks.chunks)
     else:
@@ -270,14 +276,12 @@ def _eval_model(block_index,
                 gpu_batch_size=8,
 ):
     from cellpose import models
-    from cellpose.io import logger_setup
 
     print(f'{time.ctime(time.time())}',
           f'Run model eval for block: {block_index}, size: {block_data.shape}',
           f'3-D:{do_3D}, diameter:{diameter}',
           flush=True)
 
-    logger_setup()
     np.random.seed(block_index)
 
     segmentation_device, gpu = models.assign_device(use_torch=use_torch,
@@ -401,7 +405,7 @@ def _label_adjacency_graph(labels, blocks_coords, nlabels, block_face_depth,
     all_mappings = [ da.empty((2, 0), dtype=labels.dtype, chunks=1) ]
     for face_slice, axis in block_faces_and_axes:
         face_shape = tuple([s.stop-s.start for s in face_slice])
-        face = da.rechunk(labels[face_slice], chunks=face_shape)
+        face = labels[face_slice]
         print(f'Map labels for face {face_slice} ({face_shape}) ',
               f'along {axis} axis',
               file=sys.stderr,
@@ -486,3 +490,16 @@ def _mappings_as_csr(lmapping, n):
     mat = scipy.sparse.coo_matrix((v, (l0, l1)), shape=(n, n))
     csr_mat = mat.tocsr()
     return csr_mat
+
+
+def _save_labels(l, lfilename):
+    np.save(lfilename, l)
+    return lfilename
+
+
+def _relabel_block(block, labels_filename, block_info=None):
+    if block_info is not None and labels_filename is not None:
+        labels = np.load(labels_filename)
+        return labels[block]
+    else:
+        return block

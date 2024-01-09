@@ -45,6 +45,11 @@ def _define_args():
                              dest='output',
                              type=str,
                              help = "output file")
+    args_parser.add_argument('--working-dir',
+                             dest='working_dir',
+                             default='.',
+                             type=str,
+                             help = "output file")
     args_parser.add_argument('--output-subpath', '--output_subpath',
                              dest='output_subpath',
                              type=str,
@@ -177,6 +182,7 @@ def _run_segmentation(args):
                 args.segmentation_model,
                 args.diam_mean,
                 process_blocksize,
+                args.working_dir,
                 blocksoverlap=blocks_overlaps,
                 anisotropy=args.anisotropy,
                 min_size=args.min_size,
@@ -203,7 +209,6 @@ def _run_segmentation(args):
                 scale_factors=image_attrs.get('downsamplingFactors'),
             )
 
-            print('!!!!!Persisted labels:', persisted_labels, flush=True)
             if persisted_labels is not None:
                 dask_client.compute(persisted_labels).result()
 
