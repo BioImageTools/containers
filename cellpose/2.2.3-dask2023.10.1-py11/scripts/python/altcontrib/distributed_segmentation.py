@@ -485,16 +485,4 @@ def _mappings_as_csr(lmapping, n):
     v = np.ones_like(l0)
     mat = scipy.sparse.coo_matrix((v, (l0, l1)), shape=(n, n))
     csr_mat = mat.tocsr()
-    print('!!!!!! MAT ', mat, flush=True)
-    print('!!!!!! CSR MAT ', mat, flush=True)
     return csr_mat
-
-
-def _relabel_block(labeling, image, block_info=None):
-    if block_info is not None and len(labeling) > 0:
-        print(f'Relabel {image.shape} block {block_info}',
-              f'with labels: {labeling}',
-              flush=True)
-        return labeling[image]
-    else:
-        return image
