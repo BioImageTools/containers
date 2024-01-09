@@ -28,13 +28,16 @@ def create_dataset(data_path, data_subpath, shape, chunks, dtype,
         raise e
 
 
-def open(data_path, data_subpath, data_store_name=None):
+def open(data_path, data_subpath, data_store_name=None,
+         mode='r',
+         block_coords=None):
     try:
         data_container = zarr.open(store=_get_data_store(data_path,
                                                          data_store_name),
-                                   mode='r')
+                                   mode=mode)
         a = data_container[data_subpath] if data_subpath else data_container
-        return a, a.attrs.asdict()
+        ba = a[block_coords] if block_coords is not None else a
+        return ba, a.attrs.asdict()
     except Exception as e:
         print(f'Error opening {data_path} : {data_subpath}', e, flush=True)
         raise e

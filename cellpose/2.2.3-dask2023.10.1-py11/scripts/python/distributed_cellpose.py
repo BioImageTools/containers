@@ -203,8 +203,11 @@ def _run_segmentation(args):
                 scale_factors=image_attrs.get('downsamplingFactors'),
             )
 
+            print('!!!!!Persisted labels:', persisted_labels, flush=True)
             if persisted_labels is not None:
                 dask_client.compute(persisted_labels).result()
+
+            dask_client.close()
 
         except:
             raise

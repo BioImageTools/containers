@@ -1,10 +1,11 @@
 import dask
 import dask.array as da
-import dask.bag as db
 import functools
 import io_utils.read_utils as read_utils
 import numpy as np
+import operator
 import scipy
+import sys
 import time
 import traceback
 
@@ -135,10 +136,16 @@ def distributed_segmentation(
             iou_depth,
             iou_threshold
         )
+        da_new_labeling = da.from_delayed(new_labeling,
+                                          shape=(np.nan,),
+                                          dtype=labeled_blocks.dtype,)
+        print(f'Relabel {nblocks} blocks using {labeled_blocks.chunks}',
+              f'{labeled_blocks.dtype} chunks',
+              flush=True)
         relabeled = da.map_blocks(
-            _relabel_block,
+            operator.getitem,
+            da_new_labeling,
             labeled_blocks,
-            labeling=new_labeling,
             dtype=labeled_blocks.dtype,
             chunks=labeled_blocks.chunks)
     else:
@@ -171,8 +178,12 @@ def _get_block_data(block_info,
     print(f'{time.ctime(time.time())} '
         f'Get block: {block_index}, from: {block_coords}',
         flush=True)
-    image, _ = read_utils.open(image_path, image_subpath)
-    block_data = da.from_array(image[block_coords])
+    image, _ = read_utils.open(image_path, image_subpath,
+                               block_coords=block_coords)
+    block_data = da.from_array(image)
+    print(f'{time.ctime(time.time())} '
+        f'Retrieved block {block_index} of shape {block_data.shape}',
+        flush=True)
     return block_index, block_coords, block_data
 
 
@@ -235,7 +246,8 @@ def _segment_block(eval_method,
           f'Finished segmenting block {block_index} ',
           f'in {end_time-start_time}s',
           flush=True)
-    return block_index, tuple(new_block_coords), max_label, labels
+    da_labels = da.from_array(labels)
+    return block_index, tuple(new_block_coords), max_label, da_labels
 
 
 def _eval_model(block_index,
@@ -260,7 +272,7 @@ def _eval_model(block_index,
     from cellpose import models
     from cellpose.io import logger_setup
 
-    print(f'{time.ctime(time.time())} '
+    print(f'{time.ctime(time.time())}',
           f'Run model eval for block: {block_index}, size: {block_data.shape}',
           f'3-D:{do_3D}, diameter:{diameter}',
           flush=True)
@@ -290,7 +302,7 @@ def _eval_model(block_index,
                                  stitch_threshold=stitch_threshold,
                                  batch_size=gpu_batch_size,
                                 )
-    print(f'{time.ctime(time.time())} ',
+    print(f'{time.ctime(time.time())}',
           f'Finished model eval for block: {block_index}',
           flush=True)
 
@@ -312,7 +324,8 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
     labels: dask array created from segmentation results
 
     """
-    print('Begin collecting labeled blocks (blocksize={chunksize})',
+    print(f'{time.ctime(time.time())}',
+          'Begin collecting labeled blocks (blocksize={chunksize})',
           flush=True)
     labeled_blocks_info = []
     labels = da.empty(shape, dtype=np.uint32, chunks=chunksize)
@@ -321,10 +334,12 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
     # collect segmentation results
     completed_segment_blocks = as_completed(segment_blocks_res, with_results=True)
     for f,r in completed_segment_blocks:
-        print(f'Process future {f}', flush=True)
+        print(f'Process future {f}', file=sys.stderr, flush=True)
         if f.cancelled():
             exc = f.exception()
-            print('Segment block future exception:', exc, flush=True)
+            print('Segment block future exception:', exc,
+                  file=sys.stderr,
+                  flush=True)
             tb = f.traceback()
             traceback.print_tb(tb)
 
@@ -338,7 +353,7 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
             f'block labels range: {max_label} - {max_label+max_block_label}',
             flush=True)
 
-        block_labels_offsets = np.where(block_labels > 0,
+        block_labels_offsets = da.where(block_labels > 0,
                                         max_label,
                                         np.uint32(0)).astype(np.uint32)
         block_labels += block_labels_offsets
@@ -347,11 +362,12 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
                                     block_coords,
                                     (max_label, max_label+max_block_label)))
         # set the block in the dask array of labeled blocks
-        labels[block_coords] = block_labels[...]
+        labels[block_coords] = block_labels
         max_label = max_label + max_block_label
         result_index += 1
 
-    print(f'Finished collecting labels in {shape} image',
+    print(f'{time.ctime(time.time())}',
+          f'Finished collecting labels in {shape} image',
           flush=True)
     return labels, labeled_blocks_info, max_label
 
@@ -363,12 +379,15 @@ def _link_labels(labels, blocks_info, nlabels, face_depth, iou_threshold):
                                           nlabels,
                                           face_depth,
                                           iou_threshold)
-    print('Find connected components for label groups found', flush=True)
+    print(f'{time.ctime(time.time())}',
+          'Find connected components for label groups',
+          flush=True)
     connected_comps_res = dask.delayed(scipy.sparse.csgraph.connected_components, nout=2)(
         label_groups,
         directed=False,
     )[1]
-    return da.from_delayed(connected_comps_res, shape=(np.nan,), dtype=labels.dtype)
+    # return da.from_delayed(connected_comps_res, shape=(np.nan,), dtype=labels.dtype)
+    return connected_comps_res
 
 
 def _label_adjacency_graph(labels, blocks_coords, nlabels, block_face_depth,
@@ -376,23 +395,33 @@ def _label_adjacency_graph(labels, blocks_coords, nlabels, block_face_depth,
     block_faces_and_axes = _get_face_slices_and_axes(blocks_coords,
                                                      labels.shape,
                                                      block_face_depth)
+    print('Create adjacency graph for', labels,
+          file=sys.stderr,
+          flush=True)
     all_mappings = [ da.empty((2, 0), dtype=labels.dtype, chunks=1) ]
     for face_slice, axis in block_faces_and_axes:
-        face = labels[face_slice]
-        print(f'Map labels for face {face_slice} along {axis} axis',
+        face_shape = tuple([s.stop-s.start for s in face_slice])
+        face = da.rechunk(labels[face_slice], chunks=face_shape)
+        print(f'Map labels for face {face_slice} ({face_shape}) ',
+              f'along {axis} axis',
+              file=sys.stderr,
               flush=True)
-        dmapped = dask.delayed(_across_block_label_grouping)(
+        mapped = dask.delayed(_across_block_label_grouping)(
             face, axis, iou_threshold
         )
-        mapped = da.from_delayed(
-            dmapped,
+        all_mappings.append(da.from_delayed(
+            mapped,
             shape=(2, np.nan),
             dtype=face.dtype
-        )
-        all_mappings.append(mapped)
-    i, j = da.concatenate(all_mappings, axis=1)
+        ))
+    mappings = da.concatenate(all_mappings, axis=1)
+    print(f'{time.ctime(time.time())}',
+          f'Concatenated {len(all_mappings)} mappings ->',
+          f'{mappings.shape}',
+          file=sys.stderr,
+          flush=True)
     # reformat as csr_matrix
-    return dask.delayed(_mappings_as_csr)(i, j, nlabels+1)
+    return dask.delayed(_mappings_as_csr)(mappings, nlabels+1)
 
 
 def _get_face_slices_and_axes(blocks_coords, image_shape, face_depth):
@@ -413,6 +442,8 @@ def _get_face_slices_and_axes(blocks_coords, image_shape, face_depth):
 
 
 def _across_block_label_grouping(face, axis, iou_threshold):
+    print(f'Get label grouping accross axis {axis}',
+          file=sys.stderr, flush=True)
     unique = np.unique(face)
     face0, face1 = np.split(face, 2, axis)
 
@@ -442,13 +473,28 @@ def _across_block_label_grouping(face, axis, iou_threshold):
     valid = np.all(grouped != 0, axis=0).astype(np.uint32)
     print(f'Valid labels ({valid.shape}):', valid, flush=True)
     # if there's not more than one label return it as is
-    return grouped[:, valid] if grouped.size > 2 else grouped
+    return (da.from_array(grouped[:, valid])
+            if grouped.size > 2 
+            else da.from_array(grouped))
 
 
-def _mappings_as_csr(i, j, n):
-    v = np.ones_like(i)
-    return scipy.sparse.coo_matrix((v, (i, j)), shape=(n, n)).tocsr()
+def _mappings_as_csr(lmapping, n):
+    print(f'Generate csr matrix for {lmapping.shape} labels', flush=True)
+    l0 = lmapping[0, :]
+    l1 = lmapping[0, :]
+    v = np.ones_like(l0)
+    mat = scipy.sparse.coo_matrix((v, (l0, l1)), shape=(n, n))
+    csr_mat = mat.tocsr()
+    print('!!!!!! MAT ', mat, flush=True)
+    print('!!!!!! CSR MAT ', mat, flush=True)
+    return csr_mat
 
 
-def _relabel_block(a, labeling=None):
-    return labeling[a]
+def _relabel_block(labeling, image, block_info=None):
+    if block_info is not None and len(labeling) > 0:
+        print(f'Relabel {image.shape} block {block_info}',
+              f'with labels: {labeling}',
+              flush=True)
+        return labeling[image]
+    else:
+        return image

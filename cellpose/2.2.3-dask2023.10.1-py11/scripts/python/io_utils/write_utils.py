@@ -55,7 +55,8 @@ def save(data, container_path, subpath,
             attrs['pixelResolution'] = resolution
         if scale_factors is not None:
             attrs['downsamplingFactors'] = scale_factors
-        output_data = zarr_utils.create_dataset(
+        data_store = 'n5'
+        zarr_utils.create_dataset(
             container_path,
             subpath,
             data.shape,
@@ -64,7 +65,10 @@ def save(data, container_path, subpath,
             data_store_name='n5',
             **attrs,
         )
-        persist_block = functools.partial(_save_block_to_zarr, output=output_data)
+        persist_block = functools.partial(_save_block_to_zarr,
+                                          data_path=container_path,
+                                          data_subpath=subpath,
+                                          data_store=data_store)
     elif container_ext == '.zarr':
         print(f'Persist data as zarr {container_path} ',
               f'({real_container_path}):{subpath}',
@@ -74,17 +78,20 @@ def save(data, container_path, subpath,
             attrs['pixelResolution'] = resolution
         if scale_factors is not None:
             attrs['downsamplingFactors'] = scale_factors
-        output_data = zarr_utils.create_dataset(
+        data_store = 'zarr'
+        zarr_utils.create_dataset(
             container_path,
             subpath,
             data.shape,
             blocksize,
             data.dtype,
-            data_store_name='zarr',
+            data_store_name=data_store,
             **attrs,
         )
-        persist_block = functools.partial(_save_block_to_zarr, output=output_data)
-
+        persist_block = functools.partial(_save_block_to_zarr,
+                                          data_path=container_path,
+                                          data_subpath=subpath,
+                                          data_store=data_store)
     else:
         print(f'Cannot persist data using {container_path} ',
               f'({real_container_path}): {subpath}',
@@ -178,16 +185,24 @@ def _save_block_to_tiff(block, output_dir=None, output_name=None,
                          metadata=tiff_metadata)
 
 
-def _save_block_to_zarr(block, output=None, block_info=None):
-    if block_info is not None and output is not None:
+def _save_block_to_zarr(block,
+                        data_path=None,
+                        data_subpath=None,
+                        data_store=None,
+                        block_info=None):
+    if block_info is not None:
+        print(f'Save {block_info} as {data_store} container ',
+              f'to {data_path}:{data_subpath}',
+              flush=True)
         output_coords = _block_coords_from_block_info(block_info)
         block_coords = tuple([slice(s.start-s.start, s.stop-s.start)
                               for s in output_coords])
         print(f'Write block {block.shape}',
-              f'block_info: {block_info}',
               f'output_coords: {output_coords}',
               f'block_coords: {block_coords}',
               flush=True)
+        output, _ = zarr_utils.open(data_path, data_subpath,
+                                    data_store_name=data_store, mode='a')
         output[output_coords] = block[block_coords]
 
 
