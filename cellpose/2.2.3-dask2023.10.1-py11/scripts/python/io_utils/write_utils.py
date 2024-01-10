@@ -128,7 +128,7 @@ def _save_block_to_nrrd(block, output_dir=None, output_name=None,
                         block_info=None,
                         ext='.nrrd'):
     if block_info is not None:
-        output_coords = _block_coords_from_block_info(block_info)
+        output_coords = _block_coords_from_block_info(block_info, 0)
         block_coords = tuple([slice(s.start-s.start, s.stop-s.start)
                               for s in output_coords])
 
@@ -156,7 +156,7 @@ def _save_block_to_tiff(block, output_dir=None, output_name=None,
                         ext='.tif',
                         ):
     if block_info is not None:
-        output_coords = _block_coords_from_block_info(block_info)
+        output_coords = _block_coords_from_block_info(block_info, 0)
         block_coords = tuple([slice(s.start-s.start, s.stop-s.start)
                               for s in output_coords])
 
@@ -194,7 +194,7 @@ def _save_block_to_zarr(block,
         print(f'Save {block_info} as {data_store} container ',
               f'to {data_path}:{data_subpath}',
               flush=True)
-        output_coords = _block_coords_from_block_info(block_info)
+        output_coords = _block_coords_from_block_info(block_info, 0)
         block_coords = tuple([slice(s.start-s.start, s.stop-s.start)
                               for s in output_coords])
         print(f'Write block {block.shape}',
@@ -206,5 +206,6 @@ def _save_block_to_zarr(block,
         output[output_coords] = block[block_coords]
 
 
-def _block_coords_from_block_info(block_info):
-    return tuple([slice(c[0],c[1]) for c in block_info[0]['array-location']])
+def _block_coords_from_block_info(block_info, block_index):
+    return tuple([slice(c[0],c[1])
+                  for c in block_info[block_index]['array-location']])

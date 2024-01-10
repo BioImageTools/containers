@@ -109,6 +109,12 @@ def _define_args():
                                   type=int,
                                   default=1,
                                   help='Intersection over union depth')
+    distributed_args.add_argument('--save-intermediate-labels',
+                                  action='store_true',
+                                  dest='save_intermediate_labels',
+                                  default=False,
+                                  help='Save intermediate labels as zarr')
+
     return args_parser
 
 
@@ -199,6 +205,7 @@ def _run_segmentation(args):
                 max_tasks=args.max_cellpose_tasks,
                 iou_threshold=args.iou_threshold,
                 iou_depth=args.iou_depth,
+                persist_labeled_blocks=args.save_intermediate_labels,
                 client=dask_client,
             )
 

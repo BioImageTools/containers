@@ -2,8 +2,8 @@ import dask
 import dask.array as da
 import functools
 import io_utils.read_utils as read_utils
+import io_utils.zarr_utils as zarr_utils
 import numpy as np
-import operator
 import scipy
 import sys
 import time
@@ -41,6 +41,7 @@ def distributed_segmentation(
         gpu_batch_size=8,
         iou_depth=1,
         iou_threshold=0.7,
+        persist_labeled_blocks=False,
         client=None
 ):
     if diameter <= 0:
@@ -101,58 +102,50 @@ def distributed_segmentation(
         gpu_batch_size=gpu_batch_size,
     )
 
-    get_block = functools.partial(
-        _get_block_data,
-        image_path=image_path,
-        image_subpath=image_subpath,
-    )
-
     segment_block = functools.partial(
         _segment_block,
         eval_block,
+        image_path=image_path,
+        image_subpath=image_subpath,
         blocksize=blockchunks,
         blockoverlaps=blockoverlaps,
     )
 
-    image_blocks = client.map(
-        get_block,
-        blocks_info,
-    )
-
     segment_block_res = client.map(
         segment_block,
-        image_blocks,
+        blocks_info,
     )
 
     labeled_blocks, labeled_blocks_info, max_label = _collect_labeled_blocks(
         segment_block_res,
         image_shape,
         blocksize,
+        output_dir=output_dir,
+        persist_labeled_blocks=persist_labeled_blocks,
     )
 
     if np.prod(nblocks) > 1:
+        working_labeled_blocks = labeled_blocks
         print(f'Submit link labels for {nblocks} label blocks', flush=True)
+        labeled_blocks_coords = [bi[1] for bi in labeled_blocks_info]
         new_labeling = _link_labels(
-            labeled_blocks, labeled_blocks_info, max_label,
+            working_labeled_blocks,
+            labeled_blocks_coords,
+            max_label,
             iou_depth,
             iou_threshold,
             client
         )
-        da_new_labeling = da.from_delayed(new_labeling,
-                                          shape=(np.nan,),
-                                          dtype=labeled_blocks.dtype,)
-        print(f'Relabel {nblocks} blocks using {labeled_blocks.chunks}',
-              f'{labeled_blocks.dtype} chunks',
-              flush=True)
+        print(f'Relabel {nblocks} blocks', flush=True)
         labels_filename = f'{output_dir}/labels.npy'
         saved_labels_filename = dask.delayed(_save_labels)(
-            da_new_labeling,
+            new_labeling,
             labels_filename,
         )
         relabeled = da.map_blocks(
             _relabel_block,
             labeled_blocks,
-            saved_labels_filename,
+            labels_filename=saved_labels_filename,
             dtype=labeled_blocks.dtype,
             chunks=labeled_blocks.chunks)
     else:
@@ -178,20 +171,17 @@ def _is_not_masked(mask, image_shape, blockslice):
         return False
 
 
-def _get_block_data(block_info, 
-                    image_path=None,
-                    image_subpath=None):
+def _read_block_data(block_info, image_path, image_subpath=None):
     block_index, block_coords = block_info
     print(f'{time.ctime(time.time())} '
         f'Get block: {block_index}, from: {block_coords}',
         flush=True)
-    image, _ = read_utils.open(image_path, image_subpath,
-                               block_coords=block_coords)
-    block_data = da.from_array(image)
+    block_data, _ = read_utils.open(image_path, image_subpath,
+                                    block_coords=block_coords)
     print(f'{time.ctime(time.time())} '
         f'Retrieved block {block_index} of shape {block_data.shape}',
         flush=True)
-    return block_index, block_coords, block_data
+    return block_data
 
 
 def _throttle(m, sem):
@@ -209,18 +199,22 @@ def _throttle(m, sem):
 
 
 def _segment_block(eval_method,
-                   block,
+                   block_info,
+                   image_path=None,
+                   image_subpath=None,
                    blocksize=None,
                    blockoverlaps=None,
                    preprocessing_steps=[],
 ):
-    block_index, block_coords, block_data = block
+    block_index, block_coords = block_info
     start_time = time.time()
     print(f'{time.ctime(start_time)} ',
           f'Segment block: {block_index}, {block_coords}',
           flush=True)
     block_shape = tuple([sl.stop-sl.start for sl in block_coords])
 
+    block_data = _read_block_data(block_info, image_path,
+                                  image_subpath=image_subpath)
     # preprocess
     for pp_step in preprocessing_steps:
         block_data = pp_step[0](block_data, **pp_step[1])
@@ -253,8 +247,7 @@ def _segment_block(eval_method,
           f'Finished segmenting block {block_index} ',
           f'in {end_time-start_time}s',
           flush=True)
-    da_labels = da.from_array(labels)
-    return block_index, tuple(new_block_coords), max_label, da_labels
+    return block_index, tuple(new_block_coords), max_label, labels
 
 
 def _eval_model(block_index,
@@ -314,7 +307,9 @@ def _eval_model(block_index,
     return labels.astype(np.uint32)
 
 
-def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
+def _collect_labeled_blocks(segment_blocks_res, shape, chunksize,
+                            output_dir=None,
+                            persist_labeled_blocks=False):
     """
     Collect segmentation results.
 
@@ -333,7 +328,23 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
           'Begin collecting labeled blocks (blocksize={chunksize})',
           flush=True)
     labeled_blocks_info = []
-    labels = da.empty(shape, dtype=np.uint32, chunks=chunksize)
+    if output_dir is not None and persist_labeled_blocks:
+        # collect labels in a zarr array
+        zarr_labels_container = f'{output_dir}/labeled_blocks.zarr'
+        print(f'Save labels to temporary zarr {zarr_labels_container}',
+              flush=True)
+        labels = zarr_utils.create_dataset(
+            zarr_labels_container,
+            '',
+            shape,
+            chunksize,
+            np.uint32,
+            data_store_name='zarr',
+        )
+        is_zarr = True
+    else:
+        labels = da.empty(shape, dtype=np.uint32, chunks=chunksize)
+        is_zarr = False
     result_index = 0
     max_label = 0
     # collect segmentation results
@@ -358,28 +369,28 @@ def _collect_labeled_blocks(segment_blocks_res, shape, chunksize):
             f'block labels range: {max_label} - {max_label+max_block_label}',
             flush=True)
 
-        block_labels_offsets = da.where(block_labels > 0,
+        block_labels_offsets = np.where(block_labels > 0,
                                         max_label,
                                         np.uint32(0)).astype(np.uint32)
         block_labels += block_labels_offsets
+        # set the block in the dask array of labeled blocks
+        labels[block_coords] = block_labels
         # block_index, block_coords, labels_range
         labeled_blocks_info.append((block_index,
                                     block_coords,
                                     (max_label, max_label+max_block_label)))
-        # set the block in the dask array of labeled blocks
-        labels[block_coords] = block_labels
         max_label = max_label + max_block_label
         result_index += 1
 
     print(f'{time.ctime(time.time())}',
           f'Finished collecting labels in {shape} image',
           flush=True)
-    return labels, labeled_blocks_info, max_label
+    labels_res = da.from_zarr(labels) if is_zarr else labels
+    return labels_res, labeled_blocks_info, max_label
 
 
-def _link_labels(labels, blocks_info, nlabels, face_depth, iou_threshold,
+def _link_labels(labels, blocks_coords, max_label, face_depth, iou_threshold,
                  client):
-    blocks_coords = [bi[1] for bi in blocks_info]
     label_groups = _get_adjacent_label_mappings(labels,
                                                 blocks_coords,
                                                 face_depth,
@@ -388,7 +399,7 @@ def _link_labels(labels, blocks_info, nlabels, face_depth, iou_threshold,
     print(f'{time.ctime(time.time())}',
           'Find connected components for label groups',
           flush=True)
-    return dask.delayed(_get_labels_connected_comps)(label_groups, nlabels+1)
+    return dask.delayed(_get_labels_connected_comps)(label_groups, max_label+1)
 
 
 def _get_adjacent_label_mappings(labels, blocks_coords, block_face_depth,
@@ -396,34 +407,32 @@ def _get_adjacent_label_mappings(labels, blocks_coords, block_face_depth,
                                  client):
     print(f'{time.ctime(time.time())}',
           'Create adjacency graph for', labels,
-          file=sys.stderr,
           flush=True)
     blocks_faces_and_axes = _get_blocks_faces_info(blocks_coords,
                                                    block_face_depth,
                                                    labels)
-    blocks_faces = client.map(
-        _get_block_face,
-        blocks_faces_and_axes,
-        image = labels,
-    )
+    print(f'{time.ctime(time.time())}',
+          f'Invoke label mapping for {len(blocks_faces_and_axes)} faces',
+          flush=True)
     mapped_labels = client.map(
         _across_block_label_grouping,
-        blocks_faces,
+        blocks_faces_and_axes,
         iou_threshold=iou_threshold,
-        image=labels,
+        image=labels
     )
-
+    print(f'{time.ctime(time.time())}',
+          f'Start collecting label mappings',
+          flush=True)
     all_mappings = [ da.empty((2, 0), dtype=labels.dtype, chunks=1) ]
     completed_mapped_labels = as_completed(mapped_labels, with_results=True)
     for _,mapped in completed_mapped_labels:
-        print('!!!!!!! MAPPED ', mapped)
+        print('Append mapping:', mapped, flush=True)
         all_mappings.append(mapped)
 
     mappings = da.concatenate(all_mappings, axis=1)
     print(f'{time.ctime(time.time())}',
           f'Concatenated {len(all_mappings)} mappings ->',
           f'{mappings.shape}',
-          file=sys.stderr,
           flush=True)
     return mappings
 
@@ -446,23 +455,15 @@ def _get_blocks_faces_info(blocks_coords, face_depth, image):
     return face_slices_and_axes
 
 
-def _get_block_face(block_face_info, image=None):
-    print(f'Get block face {block_face_info}', flush=True)
-    face_slice, axis = block_face_info
-    # compute the face here
-    face = image[face_slice].compute()
-    return face_slice, axis, face
-
-
 def _across_block_label_grouping(face_info, iou_threshold=0, image=None):
-    face_slice, axis, face = face_info
+    face_slice, axis = face_info
     face_shape = tuple([s.stop-s.start for s in face_slice])
     print(f'Group labels for face {face_slice} {face_shape} ',
             f'along {axis} axis',
             flush=True)
-
-    print(f'Get label grouping accross axis {axis}',
-          file=sys.stderr, flush=True)
+    face = image[face_slice].compute()
+    print(f'Get label grouping accross axis {axis} from {face.shape} image',
+          flush=True)
     unique = np.unique(face)
     face0, face1 = np.split(face, 2, axis)
 
@@ -521,9 +522,13 @@ def _save_labels(l, lfilename):
     return lfilename
 
 
-def _relabel_block(block, labels_filename, block_info=None):
+def _relabel_block(block,
+                   labels_filename=None,
+                   block_info=None):
     if block_info is not None and labels_filename is not None:
+        print(f'Relabeling block {block_info[0]}', flush=True)
         labels = np.load(labels_filename)
-        return labels[block]
+        relabeled_block = labels[block]
+        return relabeled_block
     else:
         return block

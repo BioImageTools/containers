@@ -21,8 +21,11 @@ def create_dataset(data_path, data_subpath, shape, chunks, dtype,
             return dataset
         else:
             print('Create root array', data_path)
-            return zarr.open(store=data_store, mode='a',
-                             shape=shape, chunks=chunks)
+            return zarr.open(store=data_store,
+                             shape=shape,
+                             chunks=chunks,
+                             dtype=dtype,
+                              mode='a')
     except Exception as e:
         print('Error creating a dataset at', data_path, data_subpath, e)
         raise e
