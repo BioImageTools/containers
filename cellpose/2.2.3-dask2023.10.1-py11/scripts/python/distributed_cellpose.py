@@ -218,7 +218,7 @@ def _run_segmentation(args):
 
             if persisted_labels is not None:
                 r = dask_client.compute(persisted_labels).result()
-                print('Done:', r)
+                print('DONE!')
             else:
                 print('No segmentation labels were generated')
 

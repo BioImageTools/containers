@@ -116,10 +116,9 @@ def save_blocks(dimage, persist_block, blocksize):
               f'to {chunksize} before persisting it',
               flush=True)
         rechunked_dimage = da.rechunk(dimage, chunks=chunksize)
-    saved = da.map_blocks(persist_block,
-                          rechunked_dimage,
-                          chunks=chunksize)
-    return da.all(saved)
+    return da.map_blocks(persist_block,
+                         rechunked_dimage,
+                         chunks=chunksize)
 
 
 def _save_block_to_nrrd(block, output_dir=None, output_name=None,
