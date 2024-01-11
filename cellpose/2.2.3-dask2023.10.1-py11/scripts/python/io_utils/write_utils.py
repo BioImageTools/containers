@@ -118,8 +118,6 @@ def save_blocks(dimage, persist_block, blocksize):
         rechunked_dimage = da.rechunk(dimage, chunks=chunksize)
     saved = da.map_blocks(persist_block,
                           rechunked_dimage,
-                         # drop all axis - the result of map_blocks is None
-                        #  drop_axis=tuple(range(rechunked_dimage.ndim)),
                           chunks=chunksize)
     return da.all(saved)
 
