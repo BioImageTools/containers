@@ -44,6 +44,7 @@ def distributed_segmentation(
         persist_labeled_blocks=False,
         client=None
 ):
+    start_time = time.time()
     if diameter <= 0:
         # always specify the diameter
         diameter = 30
@@ -111,6 +112,9 @@ def distributed_segmentation(
         blockoverlaps=blockoverlaps,
     )
 
+    print(f'{time.ctime(start_time)} ',
+          f'Start segmenting: {len(blocks_info)} blocks',
+          flush=True)
     segment_block_res = client.map(
         segment_block,
         blocks_info,
@@ -124,6 +128,12 @@ def distributed_segmentation(
         persist_labeled_blocks=persist_labeled_blocks,
     )
 
+    segmentation_complete_time = time.time()
+    print(f'{time.ctime(segmentation_complete_time)} ',
+          f'Finished segmentation of {len(blocks_info)} blocks',
+          f'in {segmentation_complete_time-start_time}s',
+          flush=True)
+
     if np.prod(nblocks) > 1:
         working_labeled_blocks = labeled_blocks
         print(f'Submit link labels for {nblocks} label blocks', flush=True)
@@ -136,12 +146,13 @@ def distributed_segmentation(
             iou_threshold,
             client
         )
-        print(f'Relabel {nblocks} blocks', flush=True)
+        # save labels to a temporary file for the relabeling process
         labels_filename = f'{output_dir}/labels.npy'
         saved_labels_filename = dask.delayed(_save_labels)(
             new_labeling,
             labels_filename,
         )
+        print(f'Relabel {nblocks} blocks', flush=True)
         relabeled = da.map_blocks(
             _relabel_block,
             labeled_blocks,

@@ -56,7 +56,7 @@ def save(data, container_path, subpath,
         if scale_factors is not None:
             attrs['downsamplingFactors'] = scale_factors
         data_store = 'n5'
-        zarr_utils.create_dataset(
+        zarr_data = zarr_utils.create_dataset(
             container_path,
             subpath,
             data.shape,
@@ -66,9 +66,7 @@ def save(data, container_path, subpath,
             **attrs,
         )
         persist_block = functools.partial(_save_block_to_zarr,
-                                          data_path=container_path,
-                                          data_subpath=subpath,
-                                          data_store=data_store)
+                                          zarr_output=zarr_data)
     elif container_ext == '.zarr':
         print(f'Persist data as zarr {container_path} ',
               f'({real_container_path}):{subpath}',
@@ -79,7 +77,7 @@ def save(data, container_path, subpath,
         if scale_factors is not None:
             attrs['downsamplingFactors'] = scale_factors
         data_store = 'zarr'
-        zarr_utils.create_dataset(
+        zarr_data = zarr_utils.create_dataset(
             container_path,
             subpath,
             data.shape,
@@ -89,9 +87,7 @@ def save(data, container_path, subpath,
             **attrs,
         )
         persist_block = functools.partial(_save_block_to_zarr,
-                                          data_path=container_path,
-                                          data_subpath=subpath,
-                                          data_store=data_store)
+                                          zarr_output=zarr_data)
     else:
         print(f'Cannot persist data using {container_path} ',
               f'({real_container_path}): {subpath}',
@@ -110,6 +106,9 @@ def save_blocks(dimage, persist_block, blocksize):
         chunksize = blocksize
 
     if chunksize == dimage.chunksize:
+        print(f'No rechunking of {dimage.shape} image',
+              f'- using chunksize={chunksize}',
+              flush=True)
         rechunked_dimage = dimage
     else:
         # rechunk the image
@@ -117,16 +116,18 @@ def save_blocks(dimage, persist_block, blocksize):
               f'to {chunksize} before persisting it',
               flush=True)
         rechunked_dimage = da.rechunk(dimage, chunks=chunksize)
-    return da.map_blocks(persist_block,
-                         rechunked_dimage,
+    saved = da.map_blocks(persist_block,
+                          rechunked_dimage,
                          # drop all axis - the result of map_blocks is None
-                         drop_axis=tuple(range(rechunked_dimage.ndim)),
-                         meta=np.array((np.nan)))
+                        #  drop_axis=tuple(range(rechunked_dimage.ndim)),
+                          chunks=chunksize)
+    return da.all(saved)
 
 
 def _save_block_to_nrrd(block, output_dir=None, output_name=None,
                         block_info=None,
                         ext='.nrrd'):
+    res_shape = tuple([1 for r in range(0, block.ndim)])
     if block_info is not None:
         output_coords = _block_coords_from_block_info(block_info, 0)
         block_coords = tuple([slice(s.start-s.start, s.stop-s.start)
@@ -148,6 +149,9 @@ def _save_block_to_nrrd(block, output_dir=None, output_name=None,
               flush=True)
         nrrd.write(full_filename, block[block_coords].transpose(2, 1, 0),
                    compression_level=2)
+        return np.ones(res_shape, dtype=np.uint32)
+    else:
+        return np.zeros(res_shape, dtype=np.uint32)
 
 
 def _save_block_to_tiff(block, output_dir=None, output_name=None,
@@ -155,6 +159,7 @@ def _save_block_to_tiff(block, output_dir=None, output_name=None,
                         resolution=None,
                         ext='.tif',
                         ):
+    res_shape = tuple([1 for r in range(0, block.ndim)])
     if block_info is not None:
         output_coords = _block_coords_from_block_info(block_info, 0)
         block_coords = tuple([slice(s.start-s.start, s.stop-s.start)
@@ -183,17 +188,15 @@ def _save_block_to_tiff(block, output_dir=None, output_name=None,
 
         tifffile.imwrite(full_filename, block[block_coords],
                          metadata=tiff_metadata)
+        return np.ones(res_shape, dtype=np.uint32)
+    else:
+        return np.zeros(res_shape, dtype=np.uint32)
 
 
-def _save_block_to_zarr(block,
-                        data_path=None,
-                        data_subpath=None,
-                        data_store=None,
-                        block_info=None):
-    if block_info is not None:
-        print(f'Save {block_info} as {data_store} container ',
-              f'to {data_path}:{data_subpath}',
-              flush=True)
+def _save_block_to_zarr(block, zarr_output=None, block_info=None):
+    res_shape = tuple([1 for r in range(0, block.ndim)])
+    if block_info is not None and zarr_output is not None:
+        print(f'Save block {block_info}', flush=True)
         output_coords = _block_coords_from_block_info(block_info, 0)
         block_coords = tuple([slice(s.start-s.start, s.stop-s.start)
                               for s in output_coords])
@@ -201,9 +204,10 @@ def _save_block_to_zarr(block,
               f'output_coords: {output_coords}',
               f'block_coords: {block_coords}',
               flush=True)
-        output, _ = zarr_utils.open(data_path, data_subpath,
-                                    data_store_name=data_store, mode='a')
-        output[output_coords] = block[block_coords]
+        zarr_output[output_coords] = block[block_coords]
+        return np.ones(res_shape, dtype=np.uint32)
+    else:
+        return np.zeros(res_shape, dtype=np.uint32)
 
 
 def _block_coords_from_block_info(block_info, block_index):
