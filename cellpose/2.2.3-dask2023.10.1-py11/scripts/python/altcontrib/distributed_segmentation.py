@@ -9,6 +9,7 @@ import sys
 import time
 import traceback
 
+from cellpose.models import get_user_models
 from dask.distributed import as_completed, Semaphore
 from sklearn import metrics as sk_metrics
 
@@ -102,6 +103,9 @@ def distributed_segmentation(
         device=device,
         gpu_batch_size=gpu_batch_size,
     )
+
+    print('Cache cellpose models', model_type, flush=True)
+    get_user_models()
 
     segment_block = functools.partial(
         _segment_block,
