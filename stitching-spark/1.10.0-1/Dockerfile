@@ -19,7 +19,7 @@ RUN xq -r '.project.artifactId+"-"+.project.version+".jar"' pom.xml > filename \
 RUN echo "$STITCHING_SPARK_GIT_TAG" > /tmp/app/VERSION
 
 # Create final image
-FROM ghcr.io/janeliascicomp/spark:${SPARK_VERSION}
+FROM ghcr.io/bioimagetools/spark:${SPARK_VERSION}
 ARG STITCHING_SPARK_GIT_TAG
 
 LABEL \

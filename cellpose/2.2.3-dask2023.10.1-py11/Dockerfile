@@ -1,8 +1,8 @@
-FROM  ghcr.io/janeliascicomp/dask:2023.10.1-py11-ol9
+FROM  ghcr.io/bioimagetools/dask:2023.10.1-py11-ol9
 
 LABEL software="cellpose"
 LABEL version="2"
-LABEL base_image="janeliascicomp/dask:2023.10.1-py11-ol9"
+LABEL base_image="bioimagetools/dask:2023.10.1-py11-ol9"
 LABEL software.version="2.2.3-dask2023.10.1-py11"
 LABEL about.summary="A generalist algorithm for cell and nucleus segmentation."
 LABEL about.home="https://github.com/MouseLand/cellpose"
