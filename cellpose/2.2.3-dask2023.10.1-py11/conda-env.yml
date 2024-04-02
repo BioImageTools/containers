@@ -10,7 +10,7 @@ dependencies:
   - pyyaml
   - scikit-image>=0.21.0
   - zarr=2.13.3
-  - pytorch=1.13.1
+  - pytorch=2.1.2
   - roifile
   - pip:
     - cellpose==2.2.3

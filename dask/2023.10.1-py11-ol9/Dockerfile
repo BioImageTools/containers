@@ -14,7 +14,7 @@ LABEL about.documentation="https://docs.dask.org/en/stable/"
 LABEL extra.binaries="/opt/mambaforge/bin"
 LABEL extra.scripts="/opt/scripts/daskscripts"
 LABEL about.tags="implemented-in::python, interface::daemon, role::devel-lib"
-LABEL conda_forge.minforge.version="23.3.1-1"
+LABEL conda_forge.minforge.version="23.11.0-0"
 LABEL python.version="3.11"
 LABEL bioimagetools.image.authors="goinac@janelia.hhmi.org,rokickik@janelia.hhmi.org"
 
@@ -32,7 +32,7 @@ RUN dnf update -y && \
         which
 
 # Install miniconda
-RUN wget https://github.com/conda-forge/miniforge/releases/download/23.3.1-1/Mambaforge-23.3.1-1-Linux-$(uname -m).sh \
+RUN wget https://github.com/conda-forge/miniforge/releases/download/23.11.0-0/Mambaforge-23.11.0-0-Linux-$(uname -m).sh \
     -O mamba-install.sh && \
     bash mamba-install.sh -b -p /opt/mambaforge
 

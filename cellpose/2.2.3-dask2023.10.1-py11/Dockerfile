@@ -1,8 +1,8 @@
-FROM  quay.io/bioimagetools/dask:2023.10.1-py11-ol9
+FROM  ghcr.io/janeliascicomp/dask:2023.10.1-py11-ol9
 
 LABEL software="cellpose"
 LABEL version="2"
-LABEL base_image="bioimagetools/dask:2023.10.1-py11-ol9"
+LABEL base_image="janeliascicomp/dask:2023.10.1-py11-ol9"
 LABEL software.version="2.2.3-dask2023.10.1-py11"
 LABEL about.summary="A generalist algorithm for cell and nucleus segmentation."
 LABEL about.home="https://github.com/MouseLand/cellpose"
@@ -12,7 +12,7 @@ LABEL about.documentation="https://cellpose.readthedocs.io/en/latest/"
 LABEL extra.binaries="/opt/mambaforge/bin"
 LABEL extra.scripts="/opt/scripts/cellpose"
 LABEL about.tags="implemented-in::python"
-LABEL conda_forge.minforge.version="23.3.1-1"
+LABEL conda_forge.minforge.version="23.11.0-0"
 LABEL python.version="3.11"
 LABEL extra.identifiers.biotools=cellpose
 LABEL bioimagetools.image.authors="goinac@janelia.hhmi.org,rokickik@janelia.hhmi.org"
